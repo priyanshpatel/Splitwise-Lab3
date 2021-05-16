@@ -97,7 +97,7 @@ const groupListType = new GraphQLObjectType({
 const userListType = new GraphQLObjectType({
     name: "userListType",
     fields: () => ({
-        users: {type: new GraphQLList(groupType)}
+        users: {type: new GraphQLList(userType)}
     })
 })
 
@@ -193,6 +193,44 @@ const RootQuery = new GraphQLObjectType({
                     // res.status(500).send(error)
                     return error
                 }
+            }
+        },
+
+        // Group User Search
+        groupUserSearch: {
+            type: userListType,
+            args: {
+                userId: {
+                    type: GraphQLString
+                },
+                keyword: {
+                    type: GraphQLString
+                }
+            },
+            async resolve(parent, args) {
+                const userInput = args.keyword
+                const doc = await users.find(
+                    {
+                        $and: [
+                            {
+                                $or: [{
+                                    userName: { $regex: ".*" + userInput + ".*" }
+                                },
+                                { userEmail: { $regex: ".*" + userInput + ".*" } }
+                                ]
+                            },
+                            {
+                                _id: { $ne: args.userId }
+                            }
+                        ]
+                    },
+                    {
+                        userEmail: 1,
+                        userName: 1
+                    }
+                )
+                    console.log(doc)
+                return {users: doc}
             }
         }
     }
