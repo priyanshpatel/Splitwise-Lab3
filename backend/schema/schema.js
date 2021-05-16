@@ -6,6 +6,7 @@ let expenses = require("../models/expenses");
 let groups = require("../models/groups");
 let transaction = require("../models/transaction");
 let users = require("../models/users");
+const getIndexOfGroupBalances = require('./getIndexOfGroupBalances');
 
 const {
     GraphQLObjectType,
@@ -299,46 +300,274 @@ const Mutation = new GraphQLObjectType({
                     let invitedUsersArr = invitedUsersSplit.split(',')
 
                     users.find({ _id: { $in: invitedUsersArr } })
-                    .then(response => {
-                        console.log("============invited users=================");
-                        console.log(invitedUsersArr);
+                        .then(response => {
+                            console.log("============invited users=================");
+                            console.log(invitedUsersArr);
 
-                        response.forEach(function (user) {
-                            console.log("=-=-=-=-=-=-=-=-=-=-=-=", user)
-                            users.findByIdAndUpdate({ _id: user._id }
-                                , { $push: { invitedGroups: groupId } }, { new: true }
-                            ).then(doc => {
-                                console.log("successfully updated invited group", doc);
+                            response.forEach(function (user) {
+                                console.log("=-=-=-=-=-=-=-=-=-=-=-=", user)
+                                users.findByIdAndUpdate({ _id: user._id }
+                                    , { $push: { invitedGroups: groupId } }, { new: true }
+                                ).then(doc => {
+                                    console.log("successfully updated invited group", doc);
 
-                            }).catch(error => {
-                                console.log("error", error);
-                                return error
+                                }).catch(error => {
+                                    console.log("error", error);
+                                    return error
+                                })
                             })
                         })
-                    })
 
                     users.find({ _id: { $in: args.acceptedUsers } })
-                    .then(response => {
-                    console.log("============accepted users=================");
-                    console.log(args.acceptedUsers);
+                        .then(response => {
+                            console.log("============accepted users=================");
+                            console.log(args.acceptedUsers);
 
-                    response.forEach(function (user) {
-                        users.findByIdAndUpdate({ _id: user._id }
-                            , { $push: { acceptedGroups: groupId } }, { new: true }
-                        ).then(doc => {
-                            console.log("successfully updated accepted group", doc);
-                            // return groupSaveResponse
-                            return doc
+                            response.forEach(function (user) {
+                                users.findByIdAndUpdate({ _id: user._id }
+                                    , { $push: { acceptedGroups: groupId } }, { new: true }
+                                ).then(doc => {
+                                    console.log("successfully updated accepted group", doc);
+                                    // return groupSaveResponse
+                                    return doc
+                                }).catch(error => {
+                                    console.log("error", error);
+                                })
+                            })
+
                         }).catch(error => {
-                            console.log("error", error);
+                            console.log("error while creating group", error)
+                            return error
                         })
-                    })
-                        
-                    }).catch(error => {
-                        console.log("error while creating group", error)
-                        return error
-                    })
                 })
+            }
+        },
+
+        // Add Expense
+        addExpense: {
+            type: groupType,
+            args: {
+                description: { type: GraphQLString },
+                amount: { type: GraphQLString },
+                groupId: { type: GraphQLString },
+                paidByUserId: { type: GraphQLString },
+                currency: { type: GraphQLString },
+                comments: { type: GraphQLString },
+                userId: { type: GraphQLString },
+            },
+            async resolve(parent, args) {
+                // let transaction = null
+                let expId = null
+                let groupMembers = []
+                let tranType = 3
+                let transactionList = []
+                let tranIdList = []
+                let expenseList = []
+                let debtList = []
+
+                let expense = new expenses({
+                    description: args.description,
+                    amount: args.amount,
+                    groupId: args.groupId,
+                    paidByUserId: args.userId,
+                    currency: args.currency,
+                    comments: args.comments
+                })
+
+                try {
+                    let userNameDoc = await users.findOne({ _id: args.userId }, { userName: 1 })
+                    expense.paidByUserName = userNameDoc.userName
+
+                    let groupSchemaDoc = await groups.findOne({ _id: args.groupId })
+                    expense.groupName = groupSchemaDoc.groupName
+                    groupMembers = groupSchemaDoc.acceptedUsers
+
+                    expense.paidByUserGetsBack = (args.amount - (args.amount / groupMembers.length)).toFixed(2)
+                    expense.eachUserOwes = (args.amount / groupMembers.length).toFixed(2)
+
+                    let expenseResponse = await expense.save()
+                    console.log("Expense added successfully", expenseResponse)
+                    expId = expenseResponse._id
+                    expenseList.push(expId)
+
+                    console.log(groupSchemaDoc)
+                    console.log(groupMembers)
+
+                    let groupBalances = groupSchemaDoc.groupBalances
+
+                    for (const member of groupMembers) {
+                        let settleFlag = 'N'
+                        if (member == args.userId) {
+                            tranType = 3
+                            settleFlag = 'Y'
+                        } else {
+                            tranType = 6
+                        }
+                        let groupMembersNameDoc = await users.findOne({ _id: member }, { userName: 1 })
+                        //Create Transactions
+                        transaction_ = new transaction({
+                            groupId: args.groupId,
+                            expId: expId,
+                            paidByUserId: args.userId,
+                            paidForUserId: member,
+                            tranType: tranType,
+                            amount: (args.amount / groupMembers.length).toFixed(2),
+                            settleFlag: settleFlag,
+                            groupName: groupSchemaDoc.groupName,
+                            paidByUserName: userNameDoc.userName,
+                            paidForUserName: groupMembersNameDoc.userName
+                        })
+                        let transactionResponse = await transaction_.save()
+                        console.log("transaction added successfully ", transactionResponse)
+
+                        // Create a list of transaction ids
+                        tranIdList.push(transactionResponse._id)
+
+                        // Add transaction ids to user schema for users except paid by user
+                        if (member != args.userId) {
+                            let userSchemaUpdTran = await users.updateOne(
+                                { _id: member },
+                                { $push: { transaction: transactionResponse._id } }
+                            )
+                            console.log("Transactions added successfully to paidfor user schema")
+                        }
+
+                        // Update debts
+                        let updGroupBalance = null
+                        let groupBalanceIndex = null
+
+                        if (member == args.userId) {
+                            console.log("Index of paidbyuser", getIndexOfGroupBalances(member, groupBalances))
+                            groupBalanceIndex = getIndexOfGroupBalances(member, groupBalances)
+                            if (groupBalanceIndex == -1) {
+                                updGroupBalance = {
+                                    balance: (args.amount - (args.amount / groupMembers.length)).toFixed(2),
+                                    userId: member
+                                }
+                                //push newgroupBalance
+                                groupSchemaDoc.groupBalances.push(updGroupBalance)
+                            } else {
+                                updGroupBalance = {
+                                    balance: parseFloat(groupBalances[groupBalanceIndex].balance) + parseFloat((args.amount - (args.amount / groupMembers.length)).toFixed(2)),
+                                    userId: member
+                                }
+                                groupSchemaDoc.groupBalances[groupBalanceIndex] = updGroupBalance
+                                //Update groupBalance of that particuler user
+                            }
+                        } else {
+                            groupBalanceIndex = getIndexOfGroupBalances(member, groupBalances)
+                            console.log("Index of paidforuser", getIndexOfGroupBalances(member, groupBalances))
+
+                            if (groupBalanceIndex == -1) {
+                                updGroupBalance = {
+                                    balance: 0 - (args.amount / groupMembers.length).toFixed(2),
+                                    userId: member
+                                }
+                                //save newgroupBalance
+                                groupSchemaDoc.groupBalances.push(updGroupBalance)
+                            } else {
+                                updGroupBalance = {
+                                    balance: groupBalances[groupBalanceIndex].balance - (args.amount / groupMembers.length).toFixed(2),
+                                    userId: member
+                                }
+                                groupSchemaDoc.groupBalances[groupBalanceIndex] = updGroupBalance
+                                //Update groupBalance of that particuler user
+                            }
+
+                            let userId1 = null
+                            let userId2 = null
+                            let debtAmount = null
+                            if (args.userId < member) {
+                                userId1 = args.userId
+                                userId2 = member
+                                debtAmount = (args.amount / groupMembers.length).toFixed(2)
+                            } else if (args.userId > member) {
+                                userId1 = member
+                                userId2 = args.userId
+                                debtAmount = 0 - (args.amount / groupMembers.length).toFixed(2)
+                            }
+
+                            let debtSchemaDoc = await debts.findOne({
+                                $and: [
+                                    {
+                                        $and: [
+                                            { userId1: userId1 },
+                                            { userId2: userId2 }
+                                        ]
+                                    },
+                                    { groupId: args.groupId }
+                                ]
+                            })
+                            console.log("debtSchema FindOne", debtSchemaDoc)
+
+                            if (debtSchemaDoc == null) {
+                                let debt = new debts({
+                                    groupId: args.groupId,
+                                    userId1: userId1,
+                                    userId2: userId2,
+                                    amount: debtAmount
+                                })
+                                let debtSaveRes = await debt.save()
+                                console.log("Debts saved successfully", debtSaveRes)
+                                console.log("DEBTS", debtSaveRes._id)
+
+                                debtList.push(debtSaveRes._id)
+
+                                let userDebtUpdRes = await users.updateOne(
+                                    { _id: userId1 },
+                                    { $push: { debts: debtSaveRes._id } }
+                                )
+                                console.log("Debts successully added to user 1", userDebtUpdRes)
+
+                                userDebtUpdRes = await users.updateOne(
+                                    { _id: userId2 },
+                                    { $push: { debts: debtSaveRes._id } }
+                                )
+                                console.log("Debts successfully added to user 2", userDebtUpdRes)
+
+                                let groupDebtUpdRes = await groups.updateOne(
+                                    { _id: args.groupId },
+                                    { $push: { debts: debtSaveRes._id } }
+                                )
+                                console.log("Debts successfully added to Group", groupDebtUpdRes)
+                            } else {
+                                let debtSchemaUpd = await debts.updateOne({ groupId: args.groupId, userId1: userId1, userId2: userId2 }, { $inc: { amount: debtAmount } })
+                                console.log("Debt updated successfully", debtSchemaUpd)
+                            }
+                        }
+                    }
+                    console.log("After foreach")
+                    console.log("tranid list", tranIdList)
+                    console.log("expense list", expenseList)
+
+                    //Save expense id to groups
+                    groupSchemaDoc.expenses.push(...expenseList)
+
+                    //Save transactions to groups
+                    groupSchemaDoc.transaction.push(...tranIdList)
+
+                    // Update groupbalances
+                    let groupBalancesSave = await groupSchemaDoc.save()
+                    console.log("Groupbalances, expense, transaction saved successfully", groupBalancesSave)
+
+                    let expenseSchemaDoc = await expenses.findOne({ _id: expId })
+                    expenseSchemaDoc.transactions.push(...tranIdList)
+                    let expenseSchemaSave = await expenseSchemaDoc.save()
+                    console.log("Transactions successfully added to expense", expenseSchemaSave)
+
+                    // Add transaction ids to user schema for paid by user
+                    let userSchemaUpdTran = await users.updateOne(
+                        { _id: args.userId },
+                        { $push: { transaction: tranIdList } }
+                    )
+                    console.log("Transactions added successfully to paidBy user schema")
+
+                    return expId
+
+                } catch (error) {
+                    console.log("Error while adding expense ", error)
+                    return error
+                }
             }
         }
     }
