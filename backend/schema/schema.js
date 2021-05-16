@@ -54,8 +54,7 @@ const transactionType = new GraphQLObjectType({
         tranType: { type: GraphQLString },
         amount: { type: GraphQlFloat },
         settleFlag: {
-            type: GraphQLString,
-            defaultValue: "N"
+            type: GraphQLString
         },
         settledDate: { type: GraphQLString }
     })
@@ -72,7 +71,7 @@ const groupBalanceType = new GraphQLObjectType({
 
 const groupType = new GraphQLObjectType({
     name: "groups",
-    fields: () =>({
+    fields: () => ({
         _id: { type: GraphQLID },
         groupName: { type: GraphQLString },
         createdBy: { type: GraphQLString },
@@ -89,7 +88,7 @@ const groupType = new GraphQLObjectType({
 
 const expenseType = new GraphQLObjectType({
     name: "expense",
-    fields: () =>({
+    fields: () => ({
         _id: { type: GraphQLID },
         description: { type: GraphQLString },
         amount: { type: GraphQLString },
@@ -102,8 +101,7 @@ const expenseType = new GraphQLObjectType({
         paidByUserGetsBack: { type: new GraphQLList(GraphQLString) },
         eachUserOwes: { type: new GraphQLList(groupBalanceType) },
         settleFlag: {
-            type: GraphQLString,
-            defaultValue: "N"
+            type: GraphQLString
         },
         settledWithUserId: { type: GraphQLString },
         transactions: { type: GraphQLString },
@@ -124,6 +122,7 @@ const debtType = new GraphQLObjectType({
 const RootQuery = new GraphQLObjectType({
     name: 'RootQueryType',
     fields: {
+        // get Profile
         viewProfile: {
             type: userType,
             args: {
@@ -181,6 +180,167 @@ const Mutation = new GraphQLObjectType({
             },
         },
 
+        //User Signup
+        userSignup: {
+            type: userType,
+            args: {
+                userName: {
+                    type: GraphQLString
+                },
+                userEmail: {
+                    type: GraphQLString
+                },
+                userPassword: {
+                    type: GraphQLString
+                }
+            },
+            resolve(parent, args) {
+                console.log("In user signup", args)
+
+                let user = new users({
+                    userEmail: args.userEmail,
+                    userName: args.userName,
+                    userPassword: bcrypt.hashSync(args.userPassword, 10),
+                    timezone: "",
+                    currency: "",
+                    language: "",
+                    profilePicture: ""
+                })
+
+                return user.save().then(response => {
+                    console.log("Sign up successful", response)
+                    return response
+                }).catch(error => {
+                    console.log("error while signing up", error)
+                    return error
+                })
+            }
+        },
+
+        // Update Profile
+        updateProfile: {
+            type: userType,
+            args: {
+                userId: { type: GraphQLString },
+                userName: { type: GraphQLString },
+                userEmail: { type: GraphQLString },
+                phoneNumber: { type: GraphQLString },
+                currency: { type: GraphQLString },
+                timezone: { type: GraphQLString },
+                language: { type: GraphQLString },
+                profilePicture: { type: GraphQLString }
+            },
+            resolve(parent, args) {
+                console.log("In user update profile", args)
+
+                // let imagePath = null;
+
+                // if (req.file) {
+                //     imagePath = req.file.path.substring(req.file.path.indexOf("/") + 1);
+                // }
+                // console.log("Inside update profile post");
+
+                return users.updateOne(
+                    { _id: args.userId },
+                    {
+                        $set: {
+                            userName: args.userName,
+                            userEmail: args.userEmail,
+                            phoneNumber: args.phoneNumber,
+                            currency: args.currency,
+                            timezone: args.timezone,
+                            language: args.language,
+                            // profilePicture: imagePath
+                        }
+                    }
+                ).then(response => {
+                    console.log("Profile updated", response)
+                }).catch(error => {
+                    console.log("Error while updating profile", error)
+                    return error
+                })
+            }
+        },
+
+        // Create Group
+        createGroup: {
+            type: groupType,
+            args: {
+                groupName: { type: GraphQLString },
+                createdBy: { type: GraphQLString },
+                groupPicture: { type: GraphQLString },
+                acceptedUsers: { type: new GraphQLList(GraphQLString) },
+                invitedUsers: { type: new GraphQLList(GraphQLString) }
+            },
+            resolve(parent, args) {
+                console.log("In create group", args)
+                const ts = new Date().toISOString().slice(0, 19).replace('T', ' ');
+                let groupSaveResponse = null;
+                // let imagePath = null;
+                // if (req.file) {
+                //     imagePath = req.file.path.substring(req.file.path.indexOf("/") + 1);
+                // }
+
+                let invitedUsersSplit = args.invitedUsers + ''
+
+                let group = new groups({
+                    groupName: args.groupName,
+                    createdBy: args.createdBy,
+                    createDate: ts,
+                    // groupPicture: imagePath,
+                    acceptedUsers: args.acceptedUsers,
+                    invitedUsers: invitedUsersSplit.split(',')
+                })
+
+                return group.save().then(response => {
+                    console.log("Group created successfully", response)
+                    groupSaveResponse = response
+                    const groupId = response._id
+                    let invitedUsersArr = invitedUsersSplit.split(',')
+
+                    users.find({ _id: { $in: invitedUsersArr } })
+                    .then(response => {
+                        console.log("============invited users=================");
+                        console.log(invitedUsersArr);
+
+                        response.forEach(function (user) {
+                            console.log("=-=-=-=-=-=-=-=-=-=-=-=", user)
+                            users.findByIdAndUpdate({ _id: user._id }
+                                , { $push: { invitedGroups: groupId } }, { new: true }
+                            ).then(doc => {
+                                console.log("successfully updated invited group", doc);
+
+                            }).catch(error => {
+                                console.log("error", error);
+                                return error
+                            })
+                        })
+                    })
+
+                    users.find({ _id: { $in: args.acceptedUsers } })
+                    .then(response => {
+                    console.log("============accepted users=================");
+                    console.log(args.acceptedUsers);
+
+                    response.forEach(function (user) {
+                        users.findByIdAndUpdate({ _id: user._id }
+                            , { $push: { acceptedGroups: groupId } }, { new: true }
+                        ).then(doc => {
+                            console.log("successfully updated accepted group", doc);
+                            // return groupSaveResponse
+                            return doc
+                        }).catch(error => {
+                            console.log("error", error);
+                        })
+                    })
+                        
+                    }).catch(error => {
+                        console.log("error while creating group", error)
+                        return error
+                    })
+                })
+            }
+        }
     }
 })
 const schema = new GraphQLSchema({
