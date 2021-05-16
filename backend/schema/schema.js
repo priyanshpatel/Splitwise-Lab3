@@ -569,7 +569,87 @@ const Mutation = new GraphQLObjectType({
                     return error
                 }
             }
+        },
+
+        // Accept Reject Group Invite
+        acceptRejectInvite: {
+            type: groupType,
+            args: {
+                groupId: {
+                    type: GraphQLString
+                },
+                userId: {
+                    type: GraphQLString
+                },
+                flag: {
+                    type: GraphQLString
+                }
+            },
+            resolve(parent, args) {
+                console.log("In Accept Reject Invite", args)
+                const groupId = args.groupId;
+                const userId = args.userId;
+                const flag = args.flag; //A: accept invite, R: reject invite 
+                let pendingUserIndex = null;
+                if (args.flag == 'A') {
+                    groups.updateOne({ _id: args.groupId, invitedUsers: mongoose.Types.ObjectId(args.userId) }, { $pull: { invitedUsers: args.userId }, $push: { acceptedUsers: args.userId } }).then(doc => {
+                        console.log("Member moved from pending to accepted", doc)
+            
+                        users.updateOne({ _id: args.userId, invitedGroups: mongoose.Types.ObjectId(args.groupId) }, { $pull: { invitedGroups: args.groupId }, $push: { acceptedGroups: args.groupId } }).then(doc => {
+                            console.log("Group moved from pending to accepted", doc)
+                            // res.status(200).send(doc)
+                            return doc
+                        }).catch(error => {
+                            console.log("1111111111Error while moving group from pending to accepted1111111111", error)
+                            // res.status(500).send(error)
+                            return error
+                        })
+            
+                    }).catch(error => {
+            
+                        console.log("22222222222Error while moving member from pending to accepted22222222222", error)
+                        // res.status(500).send(error)
+                        return error
+                    })
+            
+                } else if (args.flag == 'R') {
+                    groups.updateOne({ _id: args.groupId, invitedUsers: args.userId }, { $pull: { invitedUsers: args.userId } }).then(doc => {
+                        console.log("Member moved from pending to accepted", doc)
+                        users.updateOne({ _id: args.userId, invitedGroups: args.groupId }, { $pull: { invitedGroups: args.groupId } }).then(doc => {
+                            console.log("Group moved from pending to accepted", doc)
+                            // res.send(200).send(doc)
+                            return doc
+                        }).catch(error => {
+                            console.log("Error while moving group from pending to accepted", error)
+                            // res.status(500).send(error)
+                            return error
+                        })
+                    }).catch(error => {
+                        console.log("Error while moving user from pending to accepted", error)
+                        // res.status(500).send(error)
+                        return error
+                    })
+                } else if (args.flag == 'L') {
+                    groups.updateOne({ _id: args.groupId, acceptedUsers: args.userId }, { $pull: { acceptedUsers: args.userId } }).then(doc => {
+                        console.log("Member moved from pending to accepted", doc)
+                        users.updateOne({ _id: args.userId, acceptedGroups: args.groupId }, { $pull: { acceptedGroups: args.groupId } }).then(doc => {
+                            console.log("Group moved from pending to accepted", doc)
+                            // res.send(200).send(doc)
+                            return doc
+                        }).catch(error => {
+                            console.log("Error while moving group from pending to accepted", error)
+                            // res.status(500).send(error)
+                            return error
+                        })
+                    }).catch(error => {
+                        console.log("Error while moving user from pending to accepted", error)
+                        // res.status(500).send(error)
+                        return error
+                    })
+                }
+            }
         }
+
     }
 })
 const schema = new GraphQLSchema({
