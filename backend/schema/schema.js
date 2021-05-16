@@ -87,6 +87,20 @@ const groupType = new GraphQLObjectType({
     })
 });
 
+const groupListType = new GraphQLObjectType({
+    name: "groupListType",
+    fields: () => ({
+        groups: {type: new GraphQLList(groupType)}
+    })
+})
+
+const userListType = new GraphQLObjectType({
+    name: "userListType",
+    fields: () => ({
+        users: {type: new GraphQLList(groupType)}
+    })
+})
+
 const expenseType = new GraphQLObjectType({
     name: "expense",
     fields: () => ({
@@ -143,6 +157,44 @@ const RootQuery = new GraphQLObjectType({
             }
 
         },
+
+        // Group Search
+        groupSearch: {
+            type: groupListType,
+            args: {
+                userId: {
+                    type: GraphQLString
+                },
+                keyword: {
+                    type: GraphQLString
+                }
+            },
+            async resolve(parent, args) {
+                const userId = args.userId
+                const userInput = args.keyword
+
+                try {
+                    let groupSchemaDoc = await groups.find(
+                        {
+                            $and: [
+                                { acceptedUsers: { $in: userId } },
+                                { groupName: { $regex: ".*" + userInput + ".*" } }
+                            ]
+                        },
+                        {
+                            groupName: 1
+                        }
+                    )
+                    // res.status(200).send(groupSchemaDoc)
+                    console.log(groupSchemaDoc)
+                    return {groups: groupSchemaDoc}
+                } catch (error) {
+                    console.log("Error while searching groups", error)
+                    // res.status(500).send(error)
+                    return error
+                }
+            }
+        }
     }
 })
 
@@ -328,8 +380,8 @@ const Mutation = new GraphQLObjectType({
                                     , { $push: { acceptedGroups: groupId } }, { new: true }
                                 ).then(doc => {
                                     console.log("successfully updated accepted group", doc);
-                                    // return groupSaveResponse
-                                    return doc
+                                    return groupSaveResponse
+                                    // return doc
                                 }).catch(error => {
                                     console.log("error", error);
                                 })
@@ -648,7 +700,10 @@ const Mutation = new GraphQLObjectType({
                     })
                 }
             }
-        }
+        },
+
+       
+        
 
     }
 })
