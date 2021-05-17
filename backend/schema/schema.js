@@ -90,14 +90,14 @@ const groupType = new GraphQLObjectType({
 const groupListType = new GraphQLObjectType({
     name: "groupListType",
     fields: () => ({
-        groups: {type: new GraphQLList(groupType)}
+        groups: { type: new GraphQLList(groupType) }
     })
 })
 
 const userListType = new GraphQLObjectType({
     name: "userListType",
     fields: () => ({
-        users: {type: new GraphQLList(userType)}
+        users: { type: new GraphQLList(userType) }
     })
 })
 
@@ -187,7 +187,7 @@ const RootQuery = new GraphQLObjectType({
                     )
                     // res.status(200).send(groupSchemaDoc)
                     console.log(groupSchemaDoc)
-                    return {groups: groupSchemaDoc}
+                    return { groups: groupSchemaDoc }
                 } catch (error) {
                     console.log("Error while searching groups", error)
                     // res.status(500).send(error)
@@ -229,8 +229,8 @@ const RootQuery = new GraphQLObjectType({
                         userName: 1
                     }
                 )
-                    console.log(doc)
-                return {users: doc}
+                console.log(doc)
+                return { users: doc }
             }
         }
     }
@@ -684,7 +684,7 @@ const Mutation = new GraphQLObjectType({
                 if (args.flag == 'A') {
                     groups.updateOne({ _id: args.groupId, invitedUsers: mongoose.Types.ObjectId(args.userId) }, { $pull: { invitedUsers: args.userId }, $push: { acceptedUsers: args.userId } }).then(doc => {
                         console.log("Member moved from pending to accepted", doc)
-            
+
                         users.updateOne({ _id: args.userId, invitedGroups: mongoose.Types.ObjectId(args.groupId) }, { $pull: { invitedGroups: args.groupId }, $push: { acceptedGroups: args.groupId } }).then(doc => {
                             console.log("Group moved from pending to accepted", doc)
                             // res.status(200).send(doc)
@@ -694,14 +694,14 @@ const Mutation = new GraphQLObjectType({
                             // res.status(500).send(error)
                             return error
                         })
-            
+
                     }).catch(error => {
-            
+
                         console.log("22222222222Error while moving member from pending to accepted22222222222", error)
                         // res.status(500).send(error)
                         return error
                     })
-            
+
                 } else if (args.flag == 'R') {
                     groups.updateOne({ _id: args.groupId, invitedUsers: args.userId }, { $pull: { invitedUsers: args.userId } }).then(doc => {
                         console.log("Member moved from pending to accepted", doc)
@@ -740,8 +740,138 @@ const Mutation = new GraphQLObjectType({
             }
         },
 
-       
-        
+        // Settle Up
+        settleUp: {
+            type: userType,
+            args: {
+                userId: {
+                    type: GraphQLString
+                },
+                userId1: {
+                    type: GraphQLString
+                },
+                userId2: {
+                    type: GraphQLString
+                }
+            },
+            async resolve(parent, args) {
+                let userId1 = args.userId1
+                let userId2 = args.userId2
+                let userId = args.userId
+                let swap = null
+
+                if (userId2 < userId1) {
+                    swap = userId1
+                    userId1 = userId2
+                    userId2 = swap
+                }
+
+                try {
+                    // Get debts
+                    let debtSchemaDoc = await debts.find({
+                        $and: [
+                            { userId1: userId1 },
+                            { userId2: userId2 }
+                        ]
+                    })
+                    console.log("debtSchema find", debtSchemaDoc)
+
+                    // Update groupBalances pertaining to every debt
+                    for (const debt of debtSchemaDoc) {
+                        groupSchemaDoc = await groups.findOne(
+                            { _id: debt.groupId }
+                        )
+                        const groupBalanceIndexUser1 = getIndexOfGroupBalances(userId1, groupSchemaDoc.groupBalances)
+                        const groupBalanceIndexUser2 = getIndexOfGroupBalances(userId2, groupSchemaDoc.groupBalances)
+
+                        if (debt.amount < 0) {
+                            groupSchemaDoc.groupBalances[groupBalanceIndexUser1].balance = groupSchemaDoc.groupBalances[groupBalanceIndexUser1].balance + Math.abs(debt.amount)
+                            groupSchemaDoc.groupBalances[groupBalanceIndexUser2].balance = groupSchemaDoc.groupBalances[groupBalanceIndexUser2].balance - Math.abs(debt.amount)
+                        } else {
+                            groupSchemaDoc.groupBalances[groupBalanceIndexUser1].balance = groupSchemaDoc.groupBalances[groupBalanceIndexUser1].balance - Math.abs(debt.amount)
+                            groupSchemaDoc.groupBalances[groupBalanceIndexUser2].balance = groupSchemaDoc.groupBalances[groupBalanceIndexUser2].balance + Math.abs(debt.amount)
+                        }
+                        console.log("updated groupBalances", groupSchemaDoc.groupBalances)
+
+                        // Insert into expenses
+                        let expense = new expenses({
+                            description: 'settle up',
+                            amount: Math.abs(debt.amount),
+                            groupId: debt.groupId,
+                            paidByUserId: (debt.amount < 0) ? userId1 : userId2,
+                            currency: '$',
+                            settleFlag: 'Y',
+                            transactions: [],
+                            settledWithUserId: [(debt.amount < 0) ? userId2 : userId1]
+                        })
+
+                        let paidByUserIdData = (debt.amount < 0) ? userId1 : userId2
+                        let settledWithUserIdData = (debt.amount < 0) ? userId2 : userId1
+                        let paidByUserNameRes = await users.findOne({ _id: paidByUserIdData })
+                        let groupNameRes = await users.findOne({ _id: debt.groupId })
+                        let settledWithUserNameRes = await users.findOne({ _id: settledWithUserIdData })
+
+                        expense.paidByUserName = paidByUserNameRes.userName
+                        expense.settledWithUserName = settledWithUserNameRes.userName
+                        expense.groupName = groupNameRes.groupName
+
+                        let expenseResponse = await expense.save()
+                        console.log("expense added successfully ", expenseResponse)
+
+                        //Insert into transaction
+                        let transaction = new transaction({
+                            groupId: debt.groupId,
+                            expId: expenseResponse._id,
+                            paidByUserId: (debt.amount < 0) ? userId1 : userId2,
+                            paidForUserId: (debt.amount < 0) ? userId2 : userId1,
+                            tranType: 0,
+                            amount: Math.abs(debt.amount),
+                            settleFlag: 'Y'
+                        })
+                        let transactionResponse = await transaction.save()
+                        console.log("transaction added successfully ", transactionResponse)
+
+                        // Add transaction id to expenses
+                        expenseResponse.transactions.push(transactionResponse._id)
+                        let expenseSave = await expense.save()
+                        console.log("transaction id successfully added to expense", expenseSave)
+
+                        debt.amount = 0
+                        let debtSave = await debt.save()
+                        console.log("debt amount updated", debtSave)
+                    }
+
+                    // Change settle flag in transaction
+                    let tranSchemaUpd = await transaction.updateMany(
+                        {
+                            $and: [
+                                {
+                                    $or: [
+                                        { paidByUserId: userId1 },
+                                        { paidForUserId: userId1 }
+                                    ]
+                                },
+                                {
+                                    $or: [
+                                        { paidByUserId: userId2 },
+                                        { paidForUserId: userId2 }
+                                    ]
+                                }
+                            ]
+                        },
+                        { $set: { settleFlag: 'Y' } }
+                    )
+                    console.log("Settled flag successfully changed in transaction schema", tranSchemaUpd)
+                    let groupSchemaUpd = await groupSchemaDoc.save()
+                    console.log("Group Balances updated successfully", groupSchemaUpd)
+
+                    return ({ message: "Settle up successful" })
+                } catch (error) {
+                    console.log("Settle up failed", error)
+                    return error
+                }
+            }
+        }
 
     }
 })
