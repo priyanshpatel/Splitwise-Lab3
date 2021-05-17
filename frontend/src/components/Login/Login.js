@@ -47,7 +47,7 @@ export class Login extends Component {
 
         this.props.userLogin( {
             variables: {
-                userEmail: this.state.userEmail,
+                email: this.state.userEmail,
                 userPassword: this.state.userPassword,
             }
         }).then((response) => {
