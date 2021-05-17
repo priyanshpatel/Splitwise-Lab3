@@ -363,7 +363,7 @@ const Mutation = new GraphQLObjectType({
                 acceptedUsers: { type: new GraphQLList(GraphQLString) },
                 invitedUsers: { type: new GraphQLList(GraphQLString) }
             },
-            resolve(parent, args) {
+            async resolve(parent, args) {
                 console.log("In create group", args)
                 const ts = new Date().toISOString().slice(0, 19).replace('T', ' ');
                 let groupSaveResponse = null;
@@ -382,54 +382,101 @@ const Mutation = new GraphQLObjectType({
                     acceptedUsers: args.acceptedUsers,
                     invitedUsers: invitedUsersSplit.split(',')
                 })
+                try{
+                let response = await group.save()
+                console.log("Group created successfully", response)
+                groupSaveResponse = response
+                const groupId = response._id
+                let invitedUsersArr = invitedUsersSplit.split(',')
 
-                return group.save().then(response => {
-                    console.log("Group created successfully", response)
-                    groupSaveResponse = response
-                    const groupId = response._id
-                    let invitedUsersArr = invitedUsersSplit.split(',')
-
-                    users.find({ _id: { $in: invitedUsersArr } })
-                        .then(response => {
-                            console.log("============invited users=================");
-                            console.log(invitedUsersArr);
-
-                            response.forEach(function (user) {
-                                console.log("=-=-=-=-=-=-=-=-=-=-=-=", user)
-                                users.findByIdAndUpdate({ _id: user._id }
-                                    , { $push: { invitedGroups: groupId } }, { new: true }
-                                ).then(doc => {
-                                    console.log("successfully updated invited group", doc);
-
-                                }).catch(error => {
-                                    console.log("error", error);
-                                    return error
-                                })
-                            })
-                        })
-
-                    users.find({ _id: { $in: args.acceptedUsers } })
-                        .then(response => {
-                            console.log("============accepted users=================");
-                            console.log(args.acceptedUsers);
-
-                            response.forEach(function (user) {
-                                users.findByIdAndUpdate({ _id: user._id }
-                                    , { $push: { acceptedGroups: groupId } }, { new: true }
-                                ).then(doc => {
-                                    console.log("successfully updated accepted group", doc);
-                                    return groupSaveResponse
-                                    // return doc
-                                }).catch(error => {
-                                    console.log("error", error);
-                                })
-                            })
-
-                        }).catch(error => {
-                            console.log("error while creating group", error)
-                            return error
-                        })
+                response = await users.find({ _id: { $in: invitedUsersArr } })
+                console.log("============invited users=================");
+                console.log(invitedUsersArr);
+                response.forEach(async function (user) {
+                    console.log("=-=-=-=-=-=-=-=-=-=-=-=", user)
+                try{    
+                    let doc =  await users.findByIdAndUpdate({ _id: user._id }
+                        , { $push: { invitedGroups: groupId } }, { new: true }
+                    )
+                    console.log("successfully updated invited group", doc);
+                    }
+                    catch(error){
+                        console.log(error)
+                        return error
+                    }  
                 })
+
+                response = await users.find({ _id: { $in: args.acceptedUsers } })
+                      
+                console.log("============accepted users=================");
+                console.log(args.acceptedUsers);
+
+                response.forEach(async function (user) {
+                    try{
+                    let doc = await users.findByIdAndUpdate({ _id: user._id }
+                        , { $push: { acceptedGroups: groupId } }, { new: true }
+                    )
+                    console.log("successfully updated accepted group", doc);
+                    return {group: groupSaveResponse}
+                    }
+                    catch(error){
+                        console.log(error)
+                        return error
+                    }
+                })
+            }
+            catch(error) {
+                console.log("error while creating group", error)
+                return error
+            }
+////////////
+                // return group.save().then(response => {
+                //     console.log("Group created successfully", response)
+                //     groupSaveResponse = response
+                //     const groupId = response._id
+                //     let invitedUsersArr = invitedUsersSplit.split(',')
+
+                //     users.find({ _id: { $in: invitedUsersArr } })
+                //         .then(response => {
+                //             console.log("============invited users=================");
+                //             console.log(invitedUsersArr);
+
+                //             response.forEach(function (user) {
+                //                 console.log("=-=-=-=-=-=-=-=-=-=-=-=", user)
+                //                 users.findByIdAndUpdate({ _id: user._id }
+                //                     , { $push: { invitedGroups: groupId } }, { new: true }
+                //                 ).then(doc => {
+                //                     console.log("successfully updated invited group", doc);
+
+                //                 }).catch(error => {
+                //                     console.log("error", error);
+                //                     return error
+                //                 })
+                //             })
+                //         })
+
+                //     users.find({ _id: { $in: args.acceptedUsers } })
+                //         .then(response => {
+                //             console.log("============accepted users=================");
+                //             console.log(args.acceptedUsers);
+
+                //             response.forEach(function (user) {
+                //                 users.findByIdAndUpdate({ _id: user._id }
+                //                     , { $push: { acceptedGroups: groupId } }, { new: true }
+                //                 ).then(doc => {
+                //                     console.log("successfully updated accepted group", doc);
+                //                     return groupSaveResponse
+                //                     // return doc
+                //                 }).catch(error => {
+                //                     console.log("error", error);
+                //                 })
+                //             })
+
+                //         }).catch(error => {
+                //             console.log("error while creating group", error)
+                //             return error
+                //         })
+                // })
             }
         },
 

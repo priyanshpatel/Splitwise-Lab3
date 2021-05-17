@@ -44,7 +44,7 @@ app.use( ( req, res, next ) => {
 });
 
 // const signup = require('./modules/signup')
-// const login = require('./modules/login')
+const login = require('./modules/login')
 // const groups = require('./modules/groups')
 // const expenses = require('./modules/expenses')
 // const activities = require('./modules/activities')
@@ -52,7 +52,7 @@ app.use( ( req, res, next ) => {
 // const dashboard = require('./modules/dashboard')
 
 // app.use('/signup', signup)
-// app.use('/login', login)
+app.use('/login', login)
 // app.use('/groups', groups)
 // app.use('/expenses', expenses)
 // app.use('/activities', activities)
